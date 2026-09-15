@@ -176,6 +176,11 @@ uint16_t microlink_get_peer_home_region(const microlink_t *ml, uint32_t vpn_ip);
  * No-op if the region is already current. */
 esp_err_t microlink_rehome_derp(microlink_t *ml, uint16_t region);
 
+/* Kick the WireGuard handshake toward the peer owning the given VPN IP
+ * (host byte order). Use before sending application traffic on a tunnel
+ * that is not yet established; safe to call repeatedly. */
+esp_err_t microlink_trigger_handshake(microlink_t *ml, uint32_t dest_vpn_ip);
+
 /**
  * @brief Send UDP data to a peer by VPN IP
  * @param ml Handle

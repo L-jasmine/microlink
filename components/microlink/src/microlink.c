@@ -679,6 +679,11 @@ esp_err_t microlink_rehome_derp(microlink_t *ml, uint16_t region)
     return ESP_OK;
 }
 
+esp_err_t microlink_trigger_handshake(microlink_t *ml, uint32_t dest_vpn_ip)
+{
+    return ml_wg_mgr_trigger_handshake(ml, dest_vpn_ip);
+}
+
 /* ============================================================================
  * Send API
  * ========================================================================== */
