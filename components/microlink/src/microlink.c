@@ -7,6 +7,7 @@
  */
 
 #include "microlink_internal.h"
+#include "esp_heap_caps.h"
 #include "esp_log.h"
 #include "esp_random.h"
 #include "esp_timer.h"
@@ -37,6 +38,47 @@ static const char *TAG = "microlink";
 
 /* X25519 from x25519.h */
 #include "x25519.h"
+
+/* Create a task whose stack lives in PSRAM instead of scarce internal RAM.
+ * Requires CONFIG_SPIRAM_ALLOW_STACK_EXTERNAL_MEMORY=y; falls back to a
+ * regular internal-stack task otherwise. The TCB stays in internal RAM. */
+static BaseType_t ml_create_task_psram(TaskFunction_t fn, const char *name,
+                                       uint32_t stack_bytes, void *arg,
+                                       UBaseType_t prio, TaskHandle_t *handle,
+                                       BaseType_t core, bool psram_stack)
+{
+#if CONFIG_SPIRAM_ALLOW_STACK_EXTERNAL_MEMORY
+    /* Only tasks that never perform flash operations may run on a PSRAM
+     * stack: flash writes disable the cache (PSRAM included) and the
+     * running task's stack must stay in internal RAM (cache_utils assert). */
+    if (!psram_stack) {
+        return xTaskCreatePinnedToCore(fn, name, stack_bytes, arg, prio, handle, core);
+    }
+    StaticTask_t *tcb = heap_caps_malloc(sizeof(StaticTask_t),
+                                         MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT);
+    if (tcb == NULL) {
+        return pdFAIL;
+    }
+    StackType_t *stack = heap_caps_malloc(stack_bytes, MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
+    if (stack == NULL) {
+        heap_caps_free(tcb);
+        return pdFAIL;
+    }
+    *handle = xTaskCreateStaticPinnedToCore(fn, name, stack_bytes / sizeof(StackType_t),
+                                      arg, prio, stack, tcb, core);
+    if (*handle == NULL) {
+        heap_caps_free(stack);
+        heap_caps_free(tcb);
+        return pdFAIL;
+    }
+    ESP_LOGI(TAG, "Task %s created with %lu B PSRAM stack", name,
+             (unsigned long)stack_bytes);
+    return pdPASS;
+#else
+    return xTaskCreatePinnedToCore(fn, name, stack_bytes, arg, prio, handle, core);
+#endif
+}
+
 
 /* ============================================================================
  * Key Management (loaded once at init, read-only after)
@@ -367,32 +409,32 @@ skip_bsd_socket:
     ;
 #endif
 
-    /* Create tasks */
+    /* Create tasks (stacks in PSRAM to preserve scarce internal RAM) */
     BaseType_t ret;
 
-    ret = xTaskCreatePinnedToCore(ml_net_io_task, "ml_net_io", ML_TASK_NET_IO_STACK,
-                                   ml, ML_TASK_NET_IO_PRIO, &ml->net_io_task, ML_TASK_NET_IO_CORE);
+    ret = ml_create_task_psram(ml_net_io_task, "ml_net_io", ML_TASK_NET_IO_STACK,
+                               ml, ML_TASK_NET_IO_PRIO, &ml->net_io_task, ML_TASK_NET_IO_CORE, true);
     if (ret != pdPASS) {
         ESP_LOGE(TAG, "Failed to create net_io task");
         return ESP_FAIL;
     }
 
-    ret = xTaskCreatePinnedToCore(ml_derp_tx_task, "ml_derp_tx", ML_TASK_DERP_TX_STACK,
-                                   ml, ML_TASK_DERP_TX_PRIO, &ml->derp_tx_task, ML_TASK_DERP_TX_CORE);
+    ret = ml_create_task_psram(ml_derp_tx_task, "ml_derp_tx", ML_TASK_DERP_TX_STACK,
+                               ml, ML_TASK_DERP_TX_PRIO, &ml->derp_tx_task, ML_TASK_DERP_TX_CORE, true);
     if (ret != pdPASS) {
         ESP_LOGE(TAG, "Failed to create derp_tx task");
         return ESP_FAIL;
     }
 
-    ret = xTaskCreatePinnedToCore(ml_coord_task, "ml_coord", ML_TASK_COORD_STACK,
-                                   ml, ML_TASK_COORD_PRIO, &ml->coord_task, ML_TASK_COORD_CORE);
+    ret = ml_create_task_psram(ml_coord_task, "ml_coord", ML_TASK_COORD_STACK,
+                               ml, ML_TASK_COORD_PRIO, &ml->coord_task, ML_TASK_COORD_CORE, true);
     if (ret != pdPASS) {
         ESP_LOGE(TAG, "Failed to create coord task");
         return ESP_FAIL;
     }
 
-    ret = xTaskCreatePinnedToCore(ml_wg_mgr_task, "ml_wg_mgr", ML_TASK_WG_MGR_STACK,
-                                   ml, ML_TASK_WG_MGR_PRIO, &ml->wg_mgr_task, ML_TASK_WG_MGR_CORE);
+    ret = ml_create_task_psram(ml_wg_mgr_task, "ml_wg_mgr", ML_TASK_WG_MGR_STACK,
+                               ml, ML_TASK_WG_MGR_PRIO, &ml->wg_mgr_task, ML_TASK_WG_MGR_CORE, false);
     if (ret != pdPASS) {
         ESP_LOGE(TAG, "Failed to create wg_mgr task");
         return ESP_FAIL;
