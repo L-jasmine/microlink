@@ -652,6 +652,33 @@ esp_err_t microlink_get_peer_info(const microlink_t *ml, int index, microlink_pe
     return ESP_OK;
 }
 
+uint16_t microlink_get_peer_home_region(const microlink_t *ml, uint32_t vpn_ip)
+{
+    if (ml == NULL) {
+        return 0;
+    }
+    for (int i = 0; i < ml->peer_count; i++) {
+        if (ml->peers[i].vpn_ip == vpn_ip) {
+            return ml->peers[i].derp_region;
+        }
+    }
+    return 0;
+}
+
+esp_err_t microlink_rehome_derp(microlink_t *ml, uint16_t region)
+{
+    if (ml == NULL || region == 0) {
+        return ESP_ERR_INVALID_ARG;
+    }
+    if (ml->derp_home_region == region) {
+        return ESP_OK;
+    }
+    ml->derp_home_region = region;
+    xEventGroupSetBits(ml->events, ML_EVT_DERP_RECONNECT);
+    ESP_LOGI(TAG, "Home DERP region rehomed to %d", region);
+    return ESP_OK;
+}
+
 /* ============================================================================
  * Send API
  * ========================================================================== */

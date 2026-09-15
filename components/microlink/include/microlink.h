@@ -167,6 +167,15 @@ int microlink_get_peer_count(const microlink_t *ml);
  */
 esp_err_t microlink_get_peer_info(const microlink_t *ml, int index, microlink_peer_info_t *info);
 
+/* Return the home DERP region of the peer with the given VPN IP (host
+ * byte order), or 0 if the peer is unknown. */
+uint16_t microlink_get_peer_home_region(const microlink_t *ml, uint32_t vpn_ip);
+
+/* Move our DERP "mailbox" to the given region: sets the home region and
+ * asks the DERP task to reconnect so relayed packets are delivered there.
+ * No-op if the region is already current. */
+esp_err_t microlink_rehome_derp(microlink_t *ml, uint16_t region);
+
 /**
  * @brief Send UDP data to a peer by VPN IP
  * @param ml Handle
