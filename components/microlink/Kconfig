@@ -28,6 +28,16 @@ menu "MicroLink V2 Configuration"
             Maximum number of peers with active WireGuard tunnels. Each peer
             uses approximately 200 bytes plus endpoint storage.
 
+    config ML_DERP_REGION
+        int "Default DERP home region"
+        range 1 255
+        default 9
+        help
+            Region used as our DERP home ("mailbox") when the coordination
+            server does not assign one. Pick the region closest to this
+            device (and ideally to its peers) so relayed packets are
+            delivered quickly. Runtime rehoming (microlink_rehome_derp)
+            can override this later.
             Most deployments need 1-4 peers (only the peers you actively
             communicate with). For large tailnets, set this to the actual
             peer count needed, not the total tailnet size.
