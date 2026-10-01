@@ -523,11 +523,21 @@ void ml_derp_tx_task(void *arg) {
             EventBits_t bits = xEventGroupGetBits(ml->events);
             if ((bits & ML_EVT_DERP_CONNECT_REQ) && !ml->derp.connected) {
                 xEventGroupClearBits(ml->events, ML_EVT_DERP_CONNECT_REQ);
-                /* Retry up to 3 times with 2s backoff */
-                for (int attempt = 0; attempt < 3 && !ml->derp.connected; attempt++) {
+                /* Retry forever with exponential backoff (2s..30s): the DERP
+                 * link is the tunnel's lifeline. Each attempt rotates to the
+                 * next node in the home region. */
+                int attempt = 0;
+                while (!ml->derp.connected) {
+                    if (xEventGroupGetBits(ml->events) & ML_EVT_SHUTDOWN_REQUEST) {
+                        break;
+                    }
                     if (attempt > 0) {
-                        ESP_LOGW(TAG, "DERP connect retry %d/3 in 2s...", attempt + 1);
-                        vTaskDelay(pdMS_TO_TICKS(2000));
+                        int delay_ms = 2000 << (attempt > 3 ? 3 : attempt);
+                        if (delay_ms > 30000) {
+                            delay_ms = 30000;
+                        }
+                        ESP_LOGW(TAG, "DERP connect retry %d in %d ms...", attempt + 1, delay_ms);
+                        vTaskDelay(pdMS_TO_TICKS(delay_ms));
                     } else {
                         ESP_LOGI(TAG, "DERP connect requested, connecting from I/O task");
                     }
@@ -536,7 +546,9 @@ void ml_derp_tx_task(void *arg) {
                         verbose_phase = true;
                         break;
                     }
-                    ESP_LOGW(TAG, "DERP connect attempt %d failed", attempt + 1);
+                    ml->derp_node_offset++;
+                    attempt++;
+                    ESP_LOGW(TAG, "DERP connect attempt %d failed", attempt);
                 }
             }
             if (bits & ML_EVT_DERP_RECONNECT) {
@@ -545,18 +557,28 @@ void ml_derp_tx_task(void *arg) {
                          ml->derp.connected ? "connected" : "disconnected");
                 ml_derp_disconnect(ml);
                 verbose_phase = false;
-                /* Auto-reconnect after disconnect */
+                /* Auto-reconnect after disconnect, forever with backoff */
                 vTaskDelay(pdMS_TO_TICKS(1000));
-                for (int attempt = 0; attempt < 3 && !ml->derp.connected; attempt++) {
+                int attempt = 0;
+                while (!ml->derp.connected) {
+                    if (xEventGroupGetBits(ml->events) & ML_EVT_SHUTDOWN_REQUEST) {
+                        break;
+                    }
                     if (attempt > 0) {
-                        ESP_LOGW(TAG, "DERP reconnect retry %d/3 in 2s...", attempt + 1);
-                        vTaskDelay(pdMS_TO_TICKS(2000));
+                        int delay_ms = 2000 << (attempt > 3 ? 3 : attempt);
+                        if (delay_ms > 30000) {
+                            delay_ms = 30000;
+                        }
+                        ESP_LOGW(TAG, "DERP reconnect retry %d in %d ms...", attempt + 1, delay_ms);
+                        vTaskDelay(pdMS_TO_TICKS(delay_ms));
                     }
                     if (ml_derp_connect(ml) == ESP_OK) {
                         connected_since_ms = ml_get_time_ms();
                         verbose_phase = true;
                         break;
                     }
+                    ml->derp_node_offset++;
+                    attempt++;
                     ESP_LOGW(TAG, "DERP reconnect attempt %d failed", attempt + 1);
                 }
             }
@@ -649,14 +671,18 @@ esp_err_t ml_derp_connect(microlink_t *ml) {
     if (ml->derp_region_count > 0 && ml->derp_home_region > 0) {
         for (int i = 0; i < ml->derp_region_count; i++) {
             if (ml->derp_regions[i].region_id == ml->derp_home_region) {
-                /* Always use the first non-stun-only node (preferred node).
-                 * This ensures we connect to the same node as most peers. */
-                for (int attempt = 0; attempt < ml->derp_regions[i].node_count; attempt++) {
-                    if (!ml->derp_regions[i].nodes[attempt].stun_only &&
-                        ml->derp_regions[i].nodes[attempt].hostname[0]) {
-                        derp_host = ml->derp_regions[i].nodes[attempt].hostname;
-                        if (ml->derp_regions[i].nodes[attempt].derp_port > 0) {
-                            derp_port = ml->derp_regions[i].nodes[attempt].derp_port;
+                /* Rotate through the region's non-stun-only nodes: some
+                 * nodes may be throttled or unreachable from certain
+                 * networks. derp_node_offset advances after every failed
+                 * connect so successive attempts try different nodes. */
+                int count = ml->derp_regions[i].node_count;
+                for (int k = 0; k < count; k++) {
+                    int idx = (ml->derp_node_offset + k) % count;
+                    if (!ml->derp_regions[i].nodes[idx].stun_only &&
+                        ml->derp_regions[i].nodes[idx].hostname[0]) {
+                        derp_host = ml->derp_regions[i].nodes[idx].hostname;
+                        if (ml->derp_regions[i].nodes[idx].derp_port > 0) {
+                            derp_port = ml->derp_regions[i].nodes[idx].derp_port;
                         }
                         break;
                     }

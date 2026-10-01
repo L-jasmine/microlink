@@ -415,6 +415,7 @@ struct microlink_s {
     ml_derp_region_t derp_regions[ML_MAX_DERP_REGIONS];
     uint8_t derp_region_count;
     uint16_t derp_home_region;      /* Our PreferredDERP region */
+    volatile uint16_t derp_node_offset;  /* Node rotation offset after failed connects */
 
     /* Key expiry (parsed from MapResponse self-node) */
     int64_t key_expiry_epoch;       /* Unix epoch seconds, 0 = no expiry */
