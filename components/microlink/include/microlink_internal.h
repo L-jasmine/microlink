@@ -89,7 +89,7 @@ extern "C" {
 #define ML_DISCO_TRUST_DURATION_MS      15000
 #define ML_DISCO_PING_TIMEOUT_MS        5000
 #define ML_DISCO_UPGRADE_INTERVAL_MS    15000
-#define ML_DISCO_PUNCH_INTERVAL_MS      500     /* Aggressive NAT punching while no WG session */
+#define ML_DISCO_PUNCH_INTERVAL_MS      1000    /* Aggressive NAT punching while no WG session */
 #define ML_DISCO_SESSION_ACTIVE_MS      45000
 
 /* STUN servers (Tailscale primary, Google fallback) */
