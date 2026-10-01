@@ -1454,13 +1454,20 @@ static void disco_periodic_probes(microlink_t *ml) {
 
         if (!peer_allowed) continue;
 
-        /* Probe for direct path upgrade (every UPGRADE_INTERVAL when on DERP).
-         * Skip on cellular: direct paths impossible through carrier-grade NAT.
-         * Throttled to DISCO_PROBES_PER_TICK to spread load and reduce jitter. */
+        /* Probe for direct path upgrade.
+         * No WG session established yet: punch aggressively (every 500 ms,
+         * force=true to bypass the 5 s ping rate limiter) — NAT mappings on
+         * both sides must align and slow probing loses the race against
+         * application connect timeouts. Once a session (or trusted direct
+         * path) exists, relax to the normal UPGRADE_INTERVAL.
+         * Skip on cellular: direct paths impossible through carrier-grade NAT. */
+        /* A WG session that rides the DERP relay is not good enough:
+         * the relay path (seconds of RTT) cannot carry TCP+TLS. Keep
+         * punching until a direct path is established and trusted. */
         if (!ml_at_socket_is_ready() && !p->has_direct_path &&
-            now - p->last_upgrade_ms > ML_DISCO_UPGRADE_INTERVAL_MS) {
+            now - p->last_upgrade_ms > ML_DISCO_PUNCH_INTERVAL_MS) {
             if (upgrade_probes_sent < DISCO_PROBES_PER_TICK) {
-                disco_send_ping_to_peer(ml, i, false);
+                disco_send_ping_to_peer(ml, i, true);
                 p->last_upgrade_ms = now;
                 upgrade_probes_sent++;
             }
