@@ -6,6 +6,7 @@
 #include "wireguard-platform.h"
 #include "esp_random.h"
 #include "esp_timer.h"
+#include <sys/time.h>
 #include "lwip/sys.h"
 #include <string.h>
 
@@ -20,15 +21,19 @@ uint32_t wireguard_sys_now() {
 
 void wireguard_tai64n_now(uint8_t *output) {
     // TAI64N format: 8 bytes seconds + 4 bytes nanoseconds
-    // For simplicity, use Unix epoch time
-    uint64_t now_us = esp_timer_get_time();
-    uint64_t seconds = now_us / 1000000ULL;
-    uint32_t nanoseconds = (now_us % 1000000ULL) * 1000;
+    // Use wall-clock time (set via settimeofday after NTP/IP sync), NOT
+    // esp_timer uptime: uptime resets on every reboot, and the peer's
+    // replay filter then rejects our handshakes until uptime grows past
+    // the previous boot's timestamp again.
+    struct timeval tv;
+    gettimeofday(&tv, NULL);
+    uint64_t seconds = (uint64_t)tv.tv_sec;
+    uint32_t nanoseconds = (uint32_t)tv.tv_usec * 1000;
 
-    // Log raw uptime before TAI offset (only every ~5s to avoid spam)
+    // Log (only every ~5s to avoid spam)
     static uint64_t last_log_s = 0;
     if (seconds - last_log_s >= 5) {
-        printf("[TAI64N] uptime=%llu s, nano=%lu\n", (unsigned long long)seconds, (unsigned long)nanoseconds);
+        printf("[TAI64N] wall=%llu s, nano=%lu\n", (unsigned long long)seconds, (unsigned long)nanoseconds);
         last_log_s = seconds;
     }
 
