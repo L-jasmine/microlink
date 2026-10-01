@@ -539,7 +539,11 @@ static void wireguardif_process_data_message(struct wireguard_device *device, st
 								if (dest_ok) {
 									// Send packet to be processed by LWIP
 									WG_DEBUG("[WG_RX_IP] Passing %u bytes to IP layer\n", (unsigned)pbuf->tot_len);
-									ip_input(pbuf, device->netif);
+									/* Route through netif->input (tcpip_input): calling
+									 * ip_input directly here would run the whole TCP
+									 * stack inline in the wg_mgr task, racing the
+									 * tcpip thread's PCB timers (crash in tcp_output). */
+									device->netif->input(pbuf, device->netif);
 									// pbuf is owned by IP layer now
 									pbuf = NULL;
 								} else {
