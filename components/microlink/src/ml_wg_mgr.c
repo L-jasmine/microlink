@@ -457,6 +457,7 @@ static int add_peer(microlink_t *ml, const ml_peer_update_t *update) {
     p->trust_until_ms = 0;
     p->last_send_ms = 0;
     p->last_upgrade_ms = 0;
+    p->punch_interval_ms = ML_DISCO_PUNCH_INTERVAL_MS;
     p->has_direct_path = false;
     p->best_ip = 0;
     p->best_port = 0;
@@ -1455,20 +1456,25 @@ static void disco_periodic_probes(microlink_t *ml) {
         if (!peer_allowed) continue;
 
         /* Probe for direct path upgrade.
-         * No WG session established yet: punch aggressively (every 500 ms,
-         * force=true to bypass the 5 s ping rate limiter) — NAT mappings on
-         * both sides must align and slow probing loses the race against
-         * application connect timeouts. Once a session (or trusted direct
-         * path) exists, relax to the normal UPGRADE_INTERVAL.
+         * No WG session established yet: punch aggressively (randomized
+         * whole-second gap 1..5 s per peer, force=true to bypass the 5 s
+         * ping rate limiter) — NAT mappings on both sides must align, and
+         * a fixed cadence gets rate-dropped by CN ISPs. Once a session
+         * (or trusted direct path) exists, relax to the normal
+         * UPGRADE_INTERVAL.
          * Skip on cellular: direct paths impossible through carrier-grade NAT. */
         /* A WG session that rides the DERP relay is not good enough:
          * the relay path (seconds of RTT) cannot carry TCP+TLS. Keep
          * punching until a direct path is established and trusted. */
         if (!ml_at_socket_is_ready() && !p->has_direct_path &&
-            now - p->last_upgrade_ms > ML_DISCO_PUNCH_INTERVAL_MS) {
+            now - p->last_upgrade_ms > p->punch_interval_ms) {
             if (upgrade_probes_sent < DISCO_PROBES_PER_TICK) {
                 disco_send_ping_to_peer(ml, i, true);
                 p->last_upgrade_ms = now;
+                /* Randomize the next gap: a whole second in 1..5. A fixed
+                 * cadence is machine-recognizable and got rate-dropped by
+                 * CN ISPs; real tailscaled's probes are jittered too. */
+                p->punch_interval_ms = (esp_random() % 5 + 1) * 1000;
                 upgrade_probes_sent++;
             }
         }
